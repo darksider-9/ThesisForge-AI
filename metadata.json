@@ -1,0 +1,5 @@
+{
+  "name": "多智能体硕士论文生成系统",
+  "description": "多智能体硕士论文生成系统，支持自定义工作流与智能提示词生成。",
+  "requestFramePermissions": []
+}
