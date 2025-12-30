@@ -16,7 +16,9 @@
     "react-dom": "^19.2.3",
     "react-markdown": "^10.1.0",
     "docx": "^9.5.1",
-    "file-saver": "^2.0.5"
+    "file-saver": "^2.0.5",
+    "vite": "^7.3.0",
+    "@vitejs/plugin-react": "^5.1.2"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
