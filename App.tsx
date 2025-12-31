@@ -425,6 +425,7 @@ function App() {
               isCheckMode={isPaused}
               selectedIds={selectedSectionIds}
               onToggleId={toggleSectionSelection}
+              topic={input.topic}
             />
           </div>
         </div>

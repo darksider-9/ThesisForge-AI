@@ -11,8 +11,13 @@ const resolveContent = (content: ThesisContent | string): string => {
   return Object.values(content).join('\n\n');
 };
 
-export const downloadDocx = async (content: ThesisContent | string) => {
+const sanitizeFilename = (name: string): string => {
+  return name.replace(/[\/\\?%*:|"<>]/g, '_').trim() || "Thesis_Export";
+};
+
+export const downloadDocx = async (content: ThesisContent | string, filename: string = "Thesis_Master_Canvas") => {
   const fullText = resolveContent(content);
+  const safeName = sanitizeFilename(filename);
   const lines = fullText.split('\n');
   const children: (Paragraph | Table)[] = [];
 
@@ -145,10 +150,11 @@ export const downloadDocx = async (content: ThesisContent | string) => {
   });
 
   const blob = await Packer.toBlob(doc);
-  saveAs(blob, "Thesis_Master_Canvas.docx");
+  saveAs(blob, `${safeName}.docx`);
 };
 
-export const downloadPDF = (content: ThesisContent | string) => {
+export const downloadPDF = (content: ThesisContent | string, filename: string = "Thesis_Master_Canvas") => {
+  const safeName = sanitizeFilename(filename);
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 15;
@@ -192,7 +198,7 @@ export const downloadPDF = (content: ThesisContent | string) => {
   const text = resolveContent(content);
   addBlock(text);
 
-  doc.save("Thesis_Master_Canvas.pdf");
+  doc.save(`${safeName}.pdf`);
 };
 
 export const downloadPythonCode = (code: string) => {
