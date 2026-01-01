@@ -213,7 +213,7 @@ export const downloadDocx = async (
       children: [
           new Paragraph({
               children: [new TextRun({ text: config.headers.evenText, size: 20 })], 
-              alignment: AlignmentType.CENTER,
+              alignment: AlignmentType.CENTER as any,
               border: { bottom: { color: "auto", space: 1, style: BorderStyle.SINGLE, size: 6 } }
           }),
       ],
@@ -223,7 +223,7 @@ export const downloadDocx = async (
       children: [
           new Paragraph({
               children: [new TextRun({ text: config.headers.oddText.replace("Chapter_Title", "硕士学位论文"), size: 20 })], 
-              alignment: AlignmentType.CENTER,
+              alignment: AlignmentType.CENTER as any,
               border: { bottom: { color: "auto", space: 1, style: BorderStyle.SINGLE, size: 6 } }
           }),
       ],
