@@ -12,9 +12,10 @@ const FIXER_PLANNER_PROMPT = `
 
 ### 原则
 1. **纯净正文**：输出的内容**绝对不要**包含章节标题本身。
-2. **完整性**：为传入的所有小节 ID 撰写内容。
-3. **深度**：内容必须包含数学公式推导、理论证明和详尽的数据分析。
-4. **格式**：输出 JSON，Key 为 ID，Value 为 Markdown 正文。
+2. **纯文字**：严禁生成图表、表格或图片占位符。
+3. **完整性**：为传入的所有小节 ID 撰写内容。
+4. **深度**：内容必须包含数学公式推导、理论证明和详尽的数据分析。
+5. **格式**：输出 JSON，Key 为 ID，Value 为 Markdown 正文。
 
 ### 步骤
 1. 阅读章节标题和小节 ID。
@@ -32,8 +33,11 @@ const FIXER_VISUALS_PROMPT = `
 ### 原则
 1. **数量**：为当前章节设计丰富的数据表格和图表说明。
 2. **格式**：Markdown 表格。
-3. **图注**：使用 "> [图 x-y] 图表详细描述" 的格式。
+3. **图注与描述**：
+   - 使用 "> [图 x-y] 图表详细描述" 的格式。
+   - **必须**在图表后附带详细的分析描述文本。
 4. **纯净性**：严禁生成正文段落和标题，只返回图表相关内容。
+5. **范围**：不处理总结、摘要、参考文献等章节。
 
 ### 步骤
 1. 扫描章节内的小节。
@@ -485,13 +489,15 @@ export const runContentInjectionAgent = async (
         2. **转义规则**: JSON 字符串内容必须正确转义双引号和换行符。
         3. **内容要求**:
             ${isVisuals ? 
-            `- **仅生成图表**: 仅输出 Markdown 表格、数据矩阵或图表占位符 (e.g. > [图 x.x] ...)。
-             - **严禁生成正文**: 不要重复生成章节的正文文本。
+            `- **仅生成图表与描述**: 仅输出 Markdown 表格、数据矩阵或图表占位符 (e.g. > [图 x.x] ...)。
+             - **包含描述**: 每个图表后必须跟一段对图表的简要分析或描述。
+             - **严禁生成普通正文**: 不要重复生成章节的常规正文文本。
              - **严禁生成标题**: 不要包含章节标题。` 
             : 
             `- 每个ID的内容尽量详实，包含理论推导或实验数据。
              - 使用 Markdown 格式。
              - 公式使用 LaTeX $...$。
+             - **纯文本**: 严禁生成 Markdown 表格或图表占位符。专注于文字叙述。
              - **禁止重复标题**: 内容中不要包含章节标题本身 (e.g., 不要写 "# 1.1 Intro")，直接写正文。`
             }
 
@@ -527,7 +533,8 @@ export const runContentInjectionAgent = async (
     
     // **VISUALS FILTERING**
     if (isVisuals) {
-       const skipKeywords = ["摘要", "Abstract", "致谢", "Acknowledgement", "参考", "Reference", "附录", "Appendix", "目录"];
+       // Added strict filtering to avoid visual generation in inappropriate chapters
+       const skipKeywords = ["摘要", "Abstract", "致谢", "Acknowledgement", "参考", "Reference", "附录", "Appendix", "目录", "总结", "Conclusion", "展望", "Outlook"];
        const titleLower = chapter.root.title.toLowerCase();
        if (skipKeywords.some(k => titleLower.includes(k.toLowerCase()))) {
            console.log(`Skipping Visuals for: ${chapter.root.title}`);
@@ -627,10 +634,12 @@ export const regenerateSpecificSections = async (
     2. **转义规则**: JSON 字符串内容必须正确转义双引号和换行符。
     3. **内容要求**:
         ${isVisuals ? 
-        `- **仅生成图表**: 仅输出 Markdown 表格或图表说明。严禁生成正文或标题。`
+        `- **仅生成图表与描述**: 仅输出 Markdown 表格或图表说明。严禁生成正文或标题。
+         - **包含描述**: 每个图表后必须跟一段对图表的简要分析或描述。`
         : 
         `- 内容必须详实，深度优化。
          - 使用 Markdown 格式。
+         - **纯文本**: 严禁生成 Markdown 表格或图表占位符。专注于文字叙述。
          - **禁止重复标题**: 内容中不要包含章节标题本身，直接写正文。`
         }
 
@@ -698,8 +707,8 @@ export const runAgentStepStructured = async (
       updatedStructure = await runContentInjectionAgent(
           "Chief Editor (Visuals Fix)",
           FIXER_VISUALS_PROMPT,
-          userInput,
-          updatedStructure,
+          userInput, // Fixed: passing userInput instead of updatedStructure
+          updatedStructure, // pass updated as current
           apiConfig,
           true // Only missing Check
       );
