@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { UserInput, ApiConfig } from '../types';
 import { Wand2, Loader2, Settings2, Sparkles, ArrowDown, ClipboardCopy } from 'lucide-react';
 import { runIdeaRefinementAgent } from '../services/geminiService';
@@ -153,8 +154,8 @@ const InputForm: React.FC<InputFormProps & { apiConfig?: ApiConfig }> = ({
         </button>
       </div>
 
-      {/* Refinement Modal */}
-      {isRefineModalOpen && (
+      {/* Refinement Modal - Rendered via Portal to avoid stacking context issues */}
+      {isRefineModalOpen && createPortal(
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
                   <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
@@ -233,7 +234,8 @@ const InputForm: React.FC<InputFormProps & { apiConfig?: ApiConfig }> = ({
                       </button>
                   </div>
               </div>
-          </div>
+          </div>,
+          document.body
       )}
     </div>
   );
