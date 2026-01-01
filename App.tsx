@@ -155,6 +155,7 @@ function App() {
   
   // Selection & Regeneration State
   const [selectedSectionIds, setSelectedSectionIds] = useState<Set<string>>(new Set());
+  const [modificationInstruction, setModificationInstruction] = useState('');
 
   // Logs
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -203,6 +204,7 @@ function App() {
     setIsWorking(true);
     setIsPaused(false);
     setSelectedSectionIds(new Set());
+    setModificationInstruction('');
     
     setAgents(prev => prev.map(a => ({ ...a, status: 'waiting', wordCount: 0 })));
     addLog("工作流已启动。Agent 队列初始化完成。", 'info');
@@ -249,6 +251,7 @@ function App() {
       
       // Auto-select nothing on new step
       setSelectedSectionIds(new Set());
+      setModificationInstruction('');
 
     } catch (err: any) {
       console.error(err);
@@ -265,6 +268,7 @@ function App() {
     setCurrentAgentIndex(nextIndex);
     setIsPaused(false);
     setSelectedSectionIds(new Set());
+    setModificationInstruction('');
     
     // Pass the latest structure
     runAgentStep(nextIndex, thesisStructure);
@@ -288,18 +292,18 @@ function App() {
         input,
         thesisStructure,
         Array.from(selectedSectionIds),
-        apiConfig
+        apiConfig,
+        modificationInstruction // Pass user instruction
       );
 
       // Update State
       setThesisStructure(updatedStructure);
-      // Re-render markdown for history
-      // Note: We need a helper to render markdown from structure here, but ResultViewer handles structure now.
-      // We will just update history for consistency, though ResultViewer uses structure preferentially.
-      // For simplicity in this checkpoint model, we just update the structure state which triggers UI update.
+      // Note: docHistory isn't perfectly synced here for partial updates in this simple implementation, 
+      // but UI updates correctly via thesisStructure.
       
       addLog(`重写完成。`, 'success');
       setSelectedSectionIds(new Set()); // Clear selection
+      setModificationInstruction('');
 
     } catch (err: any) {
       addLog(`重写失败: ${err.message}`, 'error');
@@ -402,9 +406,21 @@ function App() {
                   <CheckCircle2 className="w-4 h-4" /> 
                   Checkpoint: {agents[currentAgentIndex]?.name}
                 </h4>
-                <p className="text-xs text-amber-700 mb-4 leading-relaxed">
-                  当前模块已完成。请检查右侧内容。如果满意，点击继续；如果不满意，勾选右侧具体段落并点击重写。
+                <p className="text-xs text-amber-700 mb-2 leading-relaxed">
+                  当前模块已完成。如需修改，请先**勾选**右侧章节，然后在下方输入具体的修改意见。
                 </p>
+                
+                {selectedSectionIds.size > 0 && (
+                  <div className="mb-3 animate-in fade-in slide-in-from-top-2">
+                    <textarea 
+                      value={modificationInstruction}
+                      onChange={(e) => setModificationInstruction(e.target.value)}
+                      placeholder="在此输入修改指令... (例如: '将这一节的重点改为Transformer架构')"
+                      className="w-full p-2 text-xs border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none bg-white min-h-[60px]"
+                    />
+                  </div>
+                )}
+
                 <div className="flex flex-col gap-2">
                   <button 
                     onClick={handleRegenerateSelected}

@@ -106,18 +106,21 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
 
   const renderSection = (section: ThesisSection) => {
     const isSelected = selectedIds?.has(section.id);
-    const hasContent = section.content || section.visuals;
+    
+    // Allow selection in check mode regardless of content presence
+    // This enables fixing structure (Architect) which has no content yet
+    const canSelect = isLatest && isCheckMode;
 
     return (
       <div id={section.id} key={section.id} className={`mb-8 scroll-mt-24 transition-all duration-300 ${isSelected ? 'bg-indigo-50/60 ring-1 ring-indigo-200 rounded-lg p-2 -mx-2' : ''}`}>
         
         {/* Title Row with Checkbox */}
         <div className="flex items-start gap-3 group">
-          {isLatest && isCheckMode && hasContent && (
+          {canSelect && (
             <button 
               onClick={() => onToggleId && onToggleId(section.id)}
               className="mt-2 text-slate-300 hover:text-indigo-600 transition-colors flex-shrink-0"
-              title="Select to rewrite this section"
+              title="勾选以修改此部分 (Select to modify)"
             >
               {isSelected ? <CheckSquare className="w-5 h-5 text-indigo-600" /> : <Square className="w-5 h-5" />}
             </button>

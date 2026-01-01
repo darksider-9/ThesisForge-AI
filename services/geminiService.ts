@@ -602,7 +602,8 @@ export const regenerateSpecificSections = async (
   userInput: UserInput,
   currentStructure: ThesisStructure,
   sectionIdsToRegenerate: string[],
-  apiConfig?: ApiConfig
+  apiConfig?: ApiConfig,
+  userInstruction?: string // Added: User specific feedback
 ): Promise<ThesisStructure> => {
   
   const newStructure = JSON.parse(JSON.stringify(currentStructure)) as ThesisStructure;
@@ -612,11 +613,11 @@ export const regenerateSpecificSections = async (
   if (sectionsToProcess.length === 0) return newStructure;
 
   const isVisuals = agent.name.includes("视觉") || agent.name.includes("Visuals") || agent.name.includes("Visuals Fix");
-  const agentName = agent.name;
+  const isArchitect = agent.name.includes("架构师") || agent.name.includes("Architect"); // Added check for Architect
   
   const structureList = sectionsToProcess.map(s => `- ID: "${s.id}" Title: "${s.title}" (Level ${s.level})`).join('\n');
 
-  const userPrompt = `
+  let userPrompt = `
     ### 任务类型: 内容重写 / 优化
     ### 上下文
     主题: ${userInput.topic}
@@ -626,28 +627,47 @@ export const regenerateSpecificSections = async (
     ### 目标小节
     ${structureList}
     
+    ### 用户具体指令 (User Feedback)
+    ${userInstruction ? `用户对这部分内容/结构提出了修改意见: "${userInstruction}"。\n请严格根据此意见进行修改。` : "用户觉得这部分不满意，请重新生成优化。"}
+    
     ### 任务要求
-    用户对上述小节的生成结果不满意，请重新撰写或设计。
     请一次性为上述**所有**小节ID生成内容。
     
     ### 约束与格式
-    1. **JSON 输出**: 必须返回 JSON 对象: { "ID": "Markdown内容..." }
+    1. **JSON 输出**: 必须返回 JSON 对象: { "ID": "Value..." }
     2. **转义规则**: JSON 字符串内容必须正确转义双引号和换行符。
-    3. **内容要求**:
-        ${isVisuals ? 
-        `- **仅生成图表与描述**: 仅输出 Markdown 表格或图表说明。严禁生成正文或标题。
-         - **包含描述**: 每个图表后必须跟一段对图表的简要分析或描述。`
-        : 
-        `- 内容必须详实，深度优化。
-         - 使用 Markdown 格式。
-         - **数学公式**: 必须使用 LaTeX 格式。行内公式使用 $...$，独立公式使用 $$...$$。
-         - **纯文本**: 严禁生成 Markdown 表格或图表占位符。专注于文字叙述。
-         - **禁止重复标题**: 内容中不要包含章节标题本身，直接写正文。`
-        }
+  `;
 
+  if (isArchitect) {
+      userPrompt += `
+    3. **架构师模式 (Structure Refinement)**:
+       - 你的任务是**修改章节标题**或**调整结构**。
+       - 返回的 JSON Value 应该是**新的标题字符串** (New Title)。
+       - 如果需要，你可以微调标题的层级标记 (如 ## 3.1)。
+       - 严禁生成正文内容。只返回标题。
+      `;
+  } else if (isVisuals) {
+      userPrompt += `
+    3. **视觉专家模式**:
+       - **仅生成图表与描述**: 仅输出 Markdown 表格或图表说明。严禁生成正文或标题。
+       - **包含描述**: 每个图表后必须跟一段对图表的简要分析或描述。
+      `;
+  } else {
+      userPrompt += `
+    3. **内容撰写模式**:
+       - 内容必须详实，深度优化。
+       - 使用 Markdown 格式。
+       - **数学公式**: 必须使用 LaTeX 格式。行内公式使用 $...$，独立公式使用 $$...$$。
+       - **纯文本**: 严禁生成 Markdown 表格或图表占位符。专注于文字叙述。
+       - **禁止重复标题**: 内容中不要包含章节标题本身，直接写正文。
+      `;
+  }
+
+  userPrompt += `
     ### 思考与执行
-    1. ${isVisuals ? '为选中小节重新设计图表/表格。' : '为选中小节重新撰写正文。'}
-    2. 返回 JSON。
+    1. 根据用户指令和模式类型生成 JSON。
+    2. 确保所有ID都有对应的结果。
+    3. 返回 JSON。
   `;
 
   try {
@@ -658,7 +678,15 @@ export const regenerateSpecificSections = async (
       for (const [key, value] of Object.entries(partialContent)) {
             const section = newStructure.find(s => s.id === key);
             if (section) {
-                if (isVisuals) {
+                if (isArchitect) {
+                    // Update Title for Architect
+                    let newTitle = value as string;
+                    // Ensure basic level indicators if lost, though LLM usually handles it or we rely on existing level
+                    if (!newTitle.startsWith('#')) {
+                         newTitle = "#".repeat(section.level) + " " + newTitle;
+                    }
+                    section.title = newTitle;
+                } else if (isVisuals) {
                     section.visuals = value as string;
                 } else {
                     let contentStr = value as string;
