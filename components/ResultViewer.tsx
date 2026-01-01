@@ -1,6 +1,8 @@
 
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { DocumentHistory, Agent, ThesisStructure, ThesisSection, ThesisStyleConfig, ApiConfig } from '../types';
 import { FileDown, FileType, Terminal, History, Type, CheckSquare, Square, List, Layout, FileCog, Loader2, Sparkles, X } from 'lucide-react';
 import { downloadDocx, downloadPDF } from '../utils/exporter';
@@ -132,10 +134,15 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
              {section.level === 2 && <h2 className="text-xl mt-6 mb-3 text-slate-800 font-bold flex items-center gap-2"><span className="text-indigo-400">#</span> {section.title.replace(/^#+\s*/, '')}</h2>}
              {section.level === 3 && <h3 className="text-lg mt-4 mb-2 text-slate-700 font-semibold flex items-center gap-2"><span className="w-1 h-1 rounded-full bg-slate-400"></span> {section.title.replace(/^#+\s*/, '')}</h3>}
              
-             {/* Content */}
+             {/* Content with Math Support */}
              {section.content && (
                 <div className="prose prose-slate max-w-none text-slate-600 text-sm leading-7 mb-4">
-                  <ReactMarkdown>{section.content}</ReactMarkdown>
+                  <ReactMarkdown 
+                    remarkPlugins={[remarkMath]} 
+                    rehypePlugins={[rehypeKatex]}
+                  >
+                    {section.content}
+                  </ReactMarkdown>
                 </div>
              )}
              
@@ -145,7 +152,12 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
                     <div className="flex items-center gap-2 mb-2 text-slate-400 uppercase font-bold text-[10px] tracking-wider">
                         <Layout className="w-3 h-3" /> Visuals / Data
                     </div>
-                    <ReactMarkdown>{section.visuals}</ReactMarkdown>
+                    <ReactMarkdown 
+                        remarkPlugins={[remarkMath]} 
+                        rehypePlugins={[rehypeKatex]}
+                    >
+                        {section.visuals}
+                    </ReactMarkdown>
                 </div>
              )}
           </div>
@@ -255,7 +267,14 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
                         <History className="w-4 h-4" />
                         Viewing snapshot version: <strong>{agents.find(a => a.id === viewMode)?.name || viewMode}</strong>
                      </div>
-                     <ReactMarkdown components={{ h1: ({node, ...props}) => <h1 className="text-3xl border-b-2 border-slate-100 pb-2 mt-8 mb-4 text-slate-900" {...props} />, h2: ({node, ...props}) => <h2 className="text-2xl mt-6 mb-3 text-slate-800" {...props} /> }}>
+                     <ReactMarkdown 
+                        components={{ 
+                            h1: ({node, ...props}) => <h1 className="text-3xl border-b-2 border-slate-100 pb-2 mt-8 mb-4 text-slate-900" {...props} />, 
+                            h2: ({node, ...props}) => <h2 className="text-2xl mt-6 mb-3 text-slate-800" {...props} /> 
+                        }}
+                        remarkPlugins={[remarkMath]} 
+                        rehypePlugins={[rehypeKatex]}
+                     >
                        {displayMarkdownHistory}
                      </ReactMarkdown>
                 </div>
