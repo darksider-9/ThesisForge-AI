@@ -1,6 +1,6 @@
 
 import { GoogleGenAI } from "@google/genai";
-import { UserInput, ThesisSection, ThesisStructure, ApiConfig, Agent } from "../types";
+import { UserInput, ThesisSection, ThesisStructure, ApiConfig, Agent, ThesisStyleConfig } from "../types";
 
 // Fallback prompts for Chief Editor (Fixer)
 const FIXER_PLANNER_PROMPT = `
@@ -211,6 +211,103 @@ const callLLM = async (
      }
      throw e;
   }
+};
+
+// ** NEW: Style Parser Agent **
+export const parseStyleGuide = async (
+    rawGuide: string,
+    apiConfig?: ApiConfig
+): Promise<ThesisStyleConfig> => {
+    const systemPrompt = `
+    ### 角色
+    你是一位**中文论文排版专家**。
+
+    ### 任务
+    从用户提供的非结构化文本中提取排版参数，输出为 JSON。
+
+    ### 字体映射规则 (非常重要)
+    - **宋体**: 输出 "SimSun"
+    - **黑体**: 输出 "SimHei"
+    - **楷体**: 输出 "KaiTi"
+    - **仿宋**: 输出 "FangSong"
+    - **Times New Roman**: 输出 "Times New Roman"
+
+    ### 字号对照表 (pt)
+    - 初号=42, 小初=36
+    - 一号=26, 小一=24
+    - 二号=22, 小二=18
+    - 三号=16, 小三=15
+    - 四号=14, 小四=12
+    - 五号=10.5, 小五=9
+
+    ### 结构映射逻辑
+    1. **Body (正文)**: 提取正文字体、字号。如果提到"首行缩进"，设置 indent: true。
+    2. **Headings (标题)**:
+       - 用户说的"章" (Chapter) 对应 JSON 中的 **h1**。
+       - 用户说的"节" (Section) 对应 JSON 中的 **h2**。
+       - 用户说的"小节" (Subsection) 对应 JSON 中的 **h3**。
+       - 注意：如果用户说"一级标题（题目）"，通常指论文总标题，但请将其规则同时也映射给 **h1** (章标题)，除非明确区分了"章标题"的规则。优先匹配明确的"章"、"节"规则。
+    3. **Tables (表格)**: 提取表格内容的字体和字号。
+
+    ### JSON 字段结构
+    {
+      "margins": { "top": 2.54, "bottom": 2.54, "left": 3.17, "right": 3.17 },
+      "body": { 
+          "font": { "family": "SimSun", "size": 12 }, 
+          "indent": true,
+          "lineSpacing": 1.5 
+      },
+      "headings": {
+          "h1": { "family": "SimHei", "size": 16, "bold": true, "align": "center" },
+          "h2": { "family": "SimHei", "size": 14, "bold": true, "align": "left" },
+          "h3": { "family": "SimHei", "size": 12, "bold": true, "align": "left" }
+      },
+      "tables": {
+          "font": { "family": "SimSun", "size": 10.5 }
+      },
+      "headers": { "useOddEven": false, "oddText": "...", "evenText": "..." }
+    }
+    `;
+
+    const userPrompt = `
+    ### 用户排版要求
+    ${rawGuide}
+
+    ### 请提取 JSON
+    `;
+
+    try {
+        const responseText = await callLLM(systemPrompt, userPrompt, apiConfig, true);
+        const parsed = extractJson(responseText);
+        
+        // Default fallbacks if parsing misses something
+        return {
+            margins: parsed.margins || { top: 2.5, bottom: 2.5, left: 3, right: 2.5 },
+            body: {
+                font: parsed.body?.font || { family: "SimSun", size: 12 },
+                indent: parsed.body?.indent !== undefined ? parsed.body.indent : true,
+                lineSpacing: parsed.body?.lineSpacing || 1.5
+            },
+            headings: {
+                h1: parsed.headings?.h1 || { family: "SimHei", size: 16, bold: true, align: "center" },
+                h2: parsed.headings?.h2 || { family: "SimHei", size: 14, bold: true, align: "left" },
+                h3: parsed.headings?.h3 || { family: "SimHei", size: 12, bold: true, align: "left" },
+                h4: parsed.headings?.h4 || { family: "SimHei", size: 12, bold: true, align: "left" }
+            },
+            tables: {
+                font: parsed.tables?.font || { family: "SimSun", size: 10.5 }
+            },
+            headers: parsed.headers || {
+                useOddEven: false,
+                oddText: "Master Thesis",
+                evenText: "Master Thesis"
+            },
+            rawGuide: rawGuide
+        };
+    } catch (e: any) {
+        console.error("Style parsing failed", e);
+        throw new Error("Failed to parse style guide.");
+    }
 };
 
 // ** NEW: Idea Refinement Agent **

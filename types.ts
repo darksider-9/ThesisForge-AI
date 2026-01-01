@@ -44,3 +44,34 @@ export interface ThesisSection {
 }
 
 export type ThesisStructure = ThesisSection[];
+
+export interface FontConfig {
+  family: string;
+  size: number; // pt
+  bold?: boolean;
+  align?: 'center' | 'left' | 'right' | 'justify';
+}
+
+export interface ThesisStyleConfig {
+  margins: { top: number; bottom: number; left: number; right: number }; // in cm
+  body: {
+    font: FontConfig;
+    indent: boolean; // First line indent (2 chars)
+    lineSpacing: number; // e.g., 1.5 or 1.25
+  };
+  headings: {
+    h1: FontConfig; // Usually Chapter
+    h2: FontConfig; // Usually Section
+    h3: FontConfig; // Usually Subsection
+    h4?: FontConfig; // Sub-subsection
+  };
+  tables: {
+    font: FontConfig;
+  };
+  headers: {
+    useOddEven: boolean;
+    oddText: string; 
+    evenText: string; 
+  };
+  rawGuide?: string; 
+}

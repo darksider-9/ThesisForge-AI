@@ -426,6 +426,7 @@ function App() {
               selectedIds={selectedSectionIds}
               onToggleId={toggleSectionSelection}
               topic={input.topic}
+              apiConfig={apiConfig}
             />
           </div>
         </div>
