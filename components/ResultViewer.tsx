@@ -45,12 +45,22 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
 
   // Helper to fix formula line breaks in markdown content
   // Remove newlines inside $$...$$ blocks to prevent awkward vertical stacking
-  // Also fix double slashes often returned by LLM: \\n -> \n
+  // Also fix double slashes often returned by LLM: \\n -> \n and \\theta -> \theta
   const preprocessMarkdown = (text: string) => {
     if (!text) return "";
-    let clean = text.replace(/\\\\n/g, '\n'); // Fix escaped newlines
     
-    // Fix Block Math: $$ \n ... \n $$ -> $$ ... $$
+    let clean = text;
+
+    // 1. Robust LaTeX Cleanup
+    // Fixes LLM artifacts like \\begin, \\\nabla, \\\\| by collapsing backslashes
+    // ONLY when followed by a letter or specific symbols.
+    // Crucially, this PRESERVES \\ (newline) if it is followed by a space or newline.
+    clean = clean.replace(/\\+([a-zA-Z{|%}_&$#])/g, '\\$1');
+
+    // 2. Fix escaped newlines (\n -> newline)
+    clean = clean.replace(/\\n/g, '\n');
+    
+    // 3. Fix Block Math: $$ \n ... \n $$ -> $$ ... $$
     // Remove newlines inside display math to keep it compact in HTML
     clean = clean.replace(/\$\$([\s\S]*?)\$\$/g, (match, inner) => {
       return '$$' + inner.replace(/[\r\n]+/g, ' ') + '$$';

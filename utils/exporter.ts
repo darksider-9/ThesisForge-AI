@@ -63,7 +63,16 @@ const getDefaultStyleConfig = (): ThesisStyleConfig => ({
 // Pre-process regex to clean up math blocks for Word
 // Removes newlines inside $$...$$ to prevent line breaking in Word
 const cleanMathForWord = (text: string): string => {
-    return text.replace(/\$\$([\s\S]*?)\$\$/g, (match, inner) => {
+    // 1. Robust LaTeX Cleanup for Word
+    // Fixes LLM artifacts like \\begin, \\\nabla by collapsing backslashes
+    // when followed by letters or command symbols.
+    let clean = text.replace(/\\+([a-zA-Z{|%}_&$#])/g, '\\$1');
+    
+    // 2. Ensure escaped newlines become real newlines for Word paragraphs
+    clean = clean.replace(/\\n/g, '\n');
+
+    // 3. Fix block math spacing
+    return clean.replace(/\$\$([\s\S]*?)\$\$/g, (match, inner) => {
         // Replace newlines with spaces
         return '$$ ' + inner.replace(/[\r\n]+/g, ' ').trim() + ' $$';
     });
@@ -77,7 +86,7 @@ export const downloadDocx = async (
   const fullText = resolveContent(content);
   const safeName = sanitizeFilename(filename);
   
-  // 1. Clean Math: Remove newlines in formulas so they don't break lines in Word
+  // 1. Clean Math & Text
   const mathCleanedText = cleanMathForWord(fullText);
 
   // 2. Remove markdown code blocks for JSON if any remain
@@ -88,7 +97,7 @@ export const downloadDocx = async (
   const config = styleConfig || getDefaultStyleConfig();
 
   // Helper to map string alignment to enum
-  const getAlign = (align?: string) => {
+  const getAlign = (align?: string): AlignmentType => {
       if (align === 'center') return AlignmentType.CENTER;
       if (align === 'right') return AlignmentType.RIGHT;
       if (align === 'justify') return AlignmentType.JUSTIFIED;
@@ -144,7 +153,7 @@ export const downloadDocx = async (
             children: cells.map(cellText => new TableCell({
                 children: [new Paragraph({ 
                     children: [createRun(cellText.trim(), tableFont, rowIndex === 0)],
-                    alignment: AlignmentType.CENTER as any
+                    alignment: AlignmentType.CENTER
                 })],
                 width: { size: 100 / cells.length, type: WidthType.PERCENTAGE },
                 margins: { top: 100, bottom: 100, left: 100, right: 100 },
@@ -248,7 +257,7 @@ export const downloadDocx = async (
     children.push(new Paragraph({
         children: [createRun(text, fontConfig, isBold)],
         heading: headingLevel,
-        alignment: align as any,
+        alignment: align,
         indent: indentConfig,
         spacing: { 
             before: spacingBefore, 

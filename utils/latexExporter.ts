@@ -101,25 +101,32 @@ const convertMarkdownToLatex = (md: string): string => {
   
   let latex = md;
 
-  // 1. Basic Cleaning
+  // 1. Robust LaTeX Cleanup
+  // Fixes LLM artifacts like \\begin, \\\nabla by collapsing backslashes
+  // ONLY when followed by a letter or specific symbols.
+  latex = latex.replace(/\\+([a-zA-Z{|%}_&$#])/g, '\\$1');
+  
+  // 2. Ensure escaped newlines become real newlines for .tex
+  latex = latex.replace(/\\n/g, '\n');
+
   // Remove markdown JSON blocks if present
   latex = latex.replace(/```json[\s\S]*?```/g, '');
 
-  // 2. Headings
+  // 3. Headings
   // Note: We strip explicit # from content usually, but safety check:
   latex = latex.replace(/^#### (.*$)/gm, '\\subsubsection{$1}');
   latex = latex.replace(/^### (.*$)/gm, '\\subsection{$1}');
   latex = latex.replace(/^## (.*$)/gm, '\\section{$1}');
   latex = latex.replace(/^# (.*$)/gm, '\\chapter{$1}'); 
 
-  // 3. Bold & Italic
+  // 4. Bold & Italic
   latex = latex.replace(/\*\*(.*?)\*\*/g, '\\textbf{$1}');
   latex = latex.replace(/\*(.*?)\*/g, '\\textit{$1}');
 
-  // 4. Lists (Simple heuristic)
+  // 5. Lists (Simple heuristic)
   latex = latex.replace(/^\s*-\s+(.*$)/gm, '\\item $1');
   
-  // 5. Captions
+  // 6. Captions
   latex = latex.replace(/^> \[(.*?)\] (.*$)/gm, '\\begin{figure}[h]\\centering\\caption{$2}\\label{fig:$1}\\end{figure}');
 
   return latex;
