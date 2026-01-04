@@ -4,8 +4,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { DocumentHistory, Agent, ThesisStructure, ThesisSection, ThesisStyleConfig, ApiConfig } from '../types';
-import { FileDown, FileType, Terminal, History, Type, CheckSquare, Square, List, Layout, FileCog, Loader2, Sparkles, X } from 'lucide-react';
-import { downloadDocx, downloadPDF } from '../utils/exporter';
+import { FileDown, FileType, Terminal, History, Type, CheckSquare, Square, List, Layout, FileCog, Loader2, Sparkles, X, Archive, Save } from 'lucide-react';
+import { downloadDocx } from '../utils/exporter';
+import { downloadLatexZip } from '../utils/latexExporter';
 import { parseStyleGuide } from '../services/geminiService';
 
 interface ResultViewerProps {
@@ -17,6 +18,7 @@ interface ResultViewerProps {
   onToggleId?: (id: string) => void;
   topic?: string;
   apiConfig?: ApiConfig;
+  onSaveSession?: () => void;
 }
 
 const ResultViewer: React.FC<ResultViewerProps> = ({ 
@@ -27,7 +29,8 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
   selectedIds,
   onToggleId,
   topic,
-  apiConfig
+  apiConfig,
+  onSaveSession
 }) => {
   const [viewMode, setViewMode] = useState<'latest' | string>('latest');
   
@@ -40,7 +43,21 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
   const isLatest = viewMode === 'latest';
   const displayMarkdownHistory = !isLatest ? (docHistory[viewMode] || "") : "";
 
-  // Construct full text for export based on current view
+  // Helper to fix formula line breaks in markdown content
+  // Remove newlines inside $$...$$ blocks to prevent awkward vertical stacking
+  // Also fix double slashes often returned by LLM: \\n -> \n
+  const preprocessMarkdown = (text: string) => {
+    if (!text) return "";
+    let clean = text.replace(/\\\\n/g, '\n'); // Fix escaped newlines
+    
+    // Fix Block Math: $$ \n ... \n $$ -> $$ ... $$
+    // Remove newlines inside display math to keep it compact in HTML
+    clean = clean.replace(/\$\$([\s\S]*?)\$\$/g, (match, inner) => {
+      return '$$' + inner.replace(/[\r\n]+/g, ' ') + '$$';
+    });
+    return clean;
+  };
+
   const getExportContentAndName = () => {
      let content = "";
      let baseName = topic && topic.trim() ? topic.trim() : "Thesis_Project";
@@ -48,7 +65,6 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
      if (isLatest) {
          if (!structure) content = "";
          else {
-             // 1. Manually add Title and TOC for Master Canvas Export
              let tocMd = `# ${baseName}\n\n`;
              tocMd += "## 目录 (Table of Contents)\n";
              structure.forEach(s => {
@@ -59,7 +75,6 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
              });
              tocMd += "\n---\n\n";
 
-             // 2. Add Body
              const bodyMd = structure.map(s => {
                  let md = `${"#".repeat(s.level)} ${s.title.replace(/^#+\s*/, '')}\n\n`;
                  if (s.content) md += `${s.content}\n\n`;
@@ -78,17 +93,28 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
      }
   };
 
-  const handleDownload = (type: 'docx' | 'pdf') => {
-      const { content, name } = getExportContentAndName();
-      if (!content) {
-          alert("当前视图没有可下载的内容 (No content to download)");
+  const handleDownload = (type: 'docx' | 'latex' | 'json') => {
+      if (type === 'json') {
+          if (onSaveSession) onSaveSession();
           return;
       }
+
+      const { content, name } = getExportContentAndName();
+      if (!content && type !== 'latex') { 
+          alert("当前视图没有可下载的内容");
+          return;
+      }
+      
       if (type === 'docx') {
-          // Pass the style config here
           downloadDocx(content, name, styleConfig);
       }
-      else downloadPDF(content, name);
+      else if (type === 'latex') {
+          if (isLatest) {
+             downloadLatexZip(structure, name);
+          } else {
+             alert("LaTeX export is currently only available for the Master Canvas (Live Structure) view.");
+          }
+      }
   };
 
   const handleParseFormat = async () => {
@@ -106,28 +132,23 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
 
   const renderSection = (section: ThesisSection) => {
     const isSelected = selectedIds?.has(section.id);
-    
-    // Allow selection in check mode regardless of content presence
-    // This enables fixing structure (Architect) which has no content yet
     const canSelect = isLatest && isCheckMode;
 
     return (
       <div id={section.id} key={section.id} className={`mb-8 scroll-mt-24 transition-all duration-300 ${isSelected ? 'bg-indigo-50/60 ring-1 ring-indigo-200 rounded-lg p-2 -mx-2' : ''}`}>
         
-        {/* Title Row with Checkbox */}
         <div className="flex items-start gap-3 group">
           {canSelect && (
             <button 
               onClick={() => onToggleId && onToggleId(section.id)}
               className="mt-2 text-slate-300 hover:text-indigo-600 transition-colors flex-shrink-0"
-              title="勾选以修改此部分 (Select to modify)"
+              title="勾选以修改或删除此部分"
             >
               {isSelected ? <CheckSquare className="w-5 h-5 text-indigo-600" /> : <Square className="w-5 h-5" />}
             </button>
           )}
           
           <div className="flex-1 overflow-hidden">
-             {/* Render Title based on Level */}
              {section.level === 1 && (
                 <div className="flex items-center gap-2 border-b-2 border-slate-100 pb-2 mt-6 mb-4">
                     <span className="w-1.5 h-6 bg-indigo-600 rounded-full"></span>
@@ -137,19 +158,17 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
              {section.level === 2 && <h2 className="text-xl mt-6 mb-3 text-slate-800 font-bold flex items-center gap-2"><span className="text-indigo-400">#</span> {section.title.replace(/^#+\s*/, '')}</h2>}
              {section.level === 3 && <h3 className="text-lg mt-4 mb-2 text-slate-700 font-semibold flex items-center gap-2"><span className="w-1 h-1 rounded-full bg-slate-400"></span> {section.title.replace(/^#+\s*/, '')}</h3>}
              
-             {/* Content with Math Support */}
              {section.content && (
                 <div className="prose prose-slate max-w-none text-slate-600 text-sm leading-7 mb-4">
                   <ReactMarkdown 
                     remarkPlugins={[remarkMath]} 
                     rehypePlugins={[rehypeKatex]}
                   >
-                    {section.content}
+                    {preprocessMarkdown(section.content)}
                   </ReactMarkdown>
                 </div>
              )}
              
-             {/* Visuals */}
              {section.visuals && (
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 my-4 text-xs font-mono text-slate-500 overflow-x-auto shadow-sm">
                     <div className="flex items-center gap-2 mb-2 text-slate-400 uppercase font-bold text-[10px] tracking-wider">
@@ -159,7 +178,7 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
                         remarkPlugins={[remarkMath]} 
                         rehypePlugins={[rehypeKatex]}
                     >
-                        {section.visuals}
+                        {preprocessMarkdown(section.visuals)}
                     </ReactMarkdown>
                 </div>
              )}
@@ -171,7 +190,7 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
 
   return (
     <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden h-[calc(100vh-8rem)] flex flex-col sticky top-24">
-      {/* Top Bar: View Switcher */}
+      {/* Top Bar */}
       <div className="bg-slate-50 border-b border-slate-200 p-2 flex items-center justify-between shrink-0">
         <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1 px-2">
            <button
@@ -201,7 +220,7 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
         </div>
       </div>
 
-      {/* Info Bar & Downloads */}
+      {/* Info Bar */}
       <div className="bg-white border-b border-slate-100 px-4 py-3 flex justify-between items-center text-xs text-slate-500 shrink-0">
         <div className="flex items-center gap-4">
            <span className="flex items-center gap-1.5">
@@ -216,6 +235,14 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
         </div>
         <div className="flex gap-2">
             <button 
+                onClick={() => handleDownload('json')}
+                className="px-3 py-1 bg-green-50 text-green-700 hover:bg-green-100 rounded-md font-medium transition-colors flex items-center gap-1.5"
+                title="Save Session to JSON"
+            >
+                <Save className="w-3 h-3" /> Save JSON
+            </button>
+            <div className="w-px h-4 bg-slate-300 mx-1 self-center"></div>
+            <button 
                 onClick={() => setIsFormatModalOpen(true)}
                 className={`px-3 py-1 rounded-md font-medium transition-colors flex items-center gap-1.5 ${styleConfig ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                 title="Configure Output Format"
@@ -223,12 +250,11 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
                 {styleConfig ? <CheckSquare className="w-3 h-3" /> : <FileCog className="w-3 h-3" />}
                 {styleConfig ? '格式已配置' : '格式设置'}
             </button>
-            <div className="w-px h-4 bg-slate-300 mx-1 self-center"></div>
             <button onClick={() => handleDownload('docx')} className="px-3 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-md font-medium transition-colors flex items-center gap-1.5" title="Download current view as DOCX">
                 <FileType className="w-3 h-3"/> .docx
             </button>
-            <button onClick={() => handleDownload('pdf')} className="px-3 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded-md font-medium transition-colors flex items-center gap-1.5" title="Download current view as PDF">
-                <FileDown className="w-3 h-3"/> .pdf
+            <button onClick={() => handleDownload('latex')} className="px-3 py-1 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-md font-medium transition-colors flex items-center gap-1.5" title="Download LaTeX ZIP">
+                <Archive className="w-3 h-3"/> .zip (LaTeX)
             </button>
         </div>
       </div>
@@ -271,14 +297,10 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
                         Viewing snapshot version: <strong>{agents.find(a => a.id === viewMode)?.name || viewMode}</strong>
                      </div>
                      <ReactMarkdown 
-                        components={{ 
-                            h1: ({node, ...props}) => <h1 className="text-3xl border-b-2 border-slate-100 pb-2 mt-8 mb-4 text-slate-900" {...props} />, 
-                            h2: ({node, ...props}) => <h2 className="text-2xl mt-6 mb-3 text-slate-800" {...props} /> 
-                        }}
                         remarkPlugins={[remarkMath]} 
                         rehypePlugins={[rehypeKatex]}
                      >
-                       {displayMarkdownHistory}
+                       {preprocessMarkdown(displayMarkdownHistory)}
                      </ReactMarkdown>
                 </div>
             )}

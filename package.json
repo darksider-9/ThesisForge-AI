@@ -19,6 +19,7 @@
     "rehype-katex": "^7.0.0",
     "docx": "^9.5.1",
     "file-saver": "^2.0.5",
+    "jszip": "^3.10.1",
     "vite": "^7.3.0",
     "@vitejs/plugin-react": "^5.1.2"
   },

@@ -24,6 +24,17 @@
       }
       /* KaTeX adjustments */
       .katex { font-size: 1.1em; }
+      /* Prevent math blocks from breaking layout */
+      .katex-display { 
+        overflow-x: auto; 
+        overflow-y: hidden;
+        padding-bottom: 4px;
+        margin: 1em 0;
+      }
+      /* Ensure text inside formulas doesn't wrap weirdly */
+      .katex .base {
+        white-space: nowrap; 
+      }
     </style>
   <script type="importmap">
 {
@@ -39,6 +50,7 @@
     "rehype-katex": "https://esm.sh/rehype-katex@^7.0.0",
     "docx": "https://esm.sh/docx@^9.5.1",
     "file-saver": "https://esm.sh/file-saver@^2.0.5",
+    "jszip": "https://esm.sh/jszip@^3.10.1",
     "vite": "https://esm.sh/vite@^7.3.0",
     "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
     "react-dom": "https://esm.sh/react-dom@^19.2.3"

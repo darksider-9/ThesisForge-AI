@@ -6,7 +6,7 @@ import WorkflowBuilder from './components/WorkflowBuilder';
 import InputForm from './components/InputForm';
 import ResultViewer from './components/ResultViewer';
 import SettingsModal from './components/SettingsModal';
-import { GraduationCap, Play, FastForward, RotateCcw, CheckCircle2, Terminal } from 'lucide-react';
+import { GraduationCap, FastForward, RotateCcw, CheckCircle2, Terminal, Trash2, Save, Upload } from 'lucide-react';
 
 const ARCHITECT_PROMPT = `
 ### 角色
@@ -160,6 +160,7 @@ function App() {
   // Logs
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addLog = (message: string, type: 'info' | 'success' | 'error' = 'info') => {
     const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
@@ -192,6 +193,70 @@ function App() {
   };
 
   const countWords = (str: string) => str ? str.replace(/\s/g, '').length : 0;
+
+  // --- Session Management ---
+
+  const handleSaveSession = () => {
+    const sessionData = {
+      timestamp: new Date().toISOString(),
+      input,
+      agents,
+      thesisStructure,
+      docHistory,
+      logs,
+      currentAgentIndex,
+      isPaused,
+      isWorking // though we usually save when paused
+    };
+    
+    const blob = new Blob([JSON.stringify(sessionData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `thesis_forge_save_${input.topic.slice(0,10)}_${new Date().getTime()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addLog("进度已保存为 JSON 文件。", 'success');
+  };
+
+  const handleLoadSessionClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        if (json.input && json.thesisStructure) {
+          setInput(json.input);
+          setAgents(json.agents);
+          setThesisStructure(json.thesisStructure);
+          setDocHistory(json.docHistory);
+          setLogs(json.logs || []);
+          setCurrentAgentIndex(json.currentAgentIndex ?? -1);
+          setIsPaused(json.isPaused || false);
+          // Force stop working on load to prevent weird states
+          setIsWorking(false);
+          
+          addLog("进度加载成功！请检查状态并继续。", 'success');
+        } else {
+          alert("无效的存档文件格式。");
+        }
+      } catch (err) {
+        alert("文件解析失败。");
+        console.error(err);
+      }
+    };
+    reader.readAsText(file);
+    // Reset input
+    e.target.value = '';
+  };
 
   // --- Core Workflow Logic ---
 
@@ -298,8 +363,6 @@ function App() {
 
       // Update State
       setThesisStructure(updatedStructure);
-      // Note: docHistory isn't perfectly synced here for partial updates in this simple implementation, 
-      // but UI updates correctly via thesisStructure.
       
       addLog(`重写完成。`, 'success');
       setSelectedSectionIds(new Set()); // Clear selection
@@ -310,6 +373,19 @@ function App() {
     } finally {
       setIsWorking(false);
     }
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedSectionIds.size === 0) return;
+    
+    const confirmDelete = window.confirm(`确定要删除选中的 ${selectedSectionIds.size} 个章节吗？删除后将无法恢复。`);
+    if (!confirmDelete) return;
+
+    // Filter out selected IDs
+    const newStructure = thesisStructure.filter(section => !selectedSectionIds.has(section.id));
+    setThesisStructure(newStructure);
+    setSelectedSectionIds(new Set());
+    addLog(`已删除 ${selectedSectionIds.size} 个章节。`, 'info');
   };
 
   const toggleSectionSelection = (id: string) => {
@@ -333,18 +409,21 @@ function App() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-slate-900 tracking-tight">多智能体硕士论文生成系统</h1>
-              <p className="text-xs text-slate-500">支持自定义工作流与智能提示词生成</p>
+              <p className="text-xs text-slate-500">ThesisForge AI - 支持 LaTeX 编译包与断点续传</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
              {apiConfig.useCustom && (
                  <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-mono border border-green-200">
                     API: {apiConfig.modelName}
                  </span>
              )}
-             <div className="text-xs font-mono bg-slate-100 px-3 py-1 rounded text-slate-500">
-                v6.5.1
-             </div>
+             
+             {/* Load Session Button */}
+             <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".json" />
+             <button onClick={handleLoadSessionClick} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
+                <Upload className="w-3 h-3" /> 读取存档
+             </button>
           </div>
         </div>
       </header>
@@ -367,7 +446,7 @@ function App() {
               onSubmit={startWorkflow}
               onOpenSettings={() => setIsSettingsOpen(true)}
               isGenerating={isWorking || (isPaused && currentAgentIndex !== -1)}
-              apiConfig={apiConfig} // Passed here
+              apiConfig={apiConfig}
             />
             
             {/* Real-time Logger */}
@@ -407,7 +486,10 @@ function App() {
                   Checkpoint: {agents[currentAgentIndex]?.name}
                 </h4>
                 <p className="text-xs text-amber-700 mb-2 leading-relaxed">
-                  当前模块已完成。如需修改，请先**勾选**右侧章节，然后在下方输入具体的修改意见。
+                  当前模块已完成。您可以：
+                  1. 勾选右侧章节进行<b>重写</b>或<b>删除</b>。
+                  2. <b>保存进度</b>以便稍后继续。
+                  3. 点击<b>继续</b>进入下一阶段。
                 </p>
                 
                 {selectedSectionIds.size > 0 && (
@@ -422,13 +504,32 @@ function App() {
                 )}
 
                 <div className="flex flex-col gap-2">
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={handleRegenerateSelected}
+                      disabled={selectedSectionIds.size === 0 || isWorking}
+                      className="flex-1 py-2 bg-white border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors text-xs font-semibold flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <RotateCcw className="w-3 h-3" /> 重写 ({selectedSectionIds.size})
+                    </button>
+                    <button 
+                      onClick={handleDeleteSelected}
+                      disabled={selectedSectionIds.size === 0 || isWorking}
+                      className="px-3 py-2 bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors text-xs font-semibold flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="删除选中章节"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                  
+                  {/* Save Button for Safety */}
                   <button 
-                    onClick={handleRegenerateSelected}
-                    disabled={selectedSectionIds.size === 0 || isWorking}
-                    className="w-full py-2 bg-white border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleSaveSession}
+                    className="w-full py-2 bg-white border border-slate-300 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors text-sm font-semibold flex items-center justify-center gap-2"
                   >
-                    <RotateCcw className="w-3 h-3" /> 重写选中部分 ({selectedSectionIds.size})
+                    <Save className="w-3 h-3" /> 保存当前进度 (JSON)
                   </button>
+
                   <button 
                     onClick={handleContinue}
                     className="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-semibold flex items-center justify-center gap-2 shadow-sm"
@@ -452,6 +553,7 @@ function App() {
               onToggleId={toggleSectionSelection}
               topic={input.topic}
               apiConfig={apiConfig}
+              onSaveSession={handleSaveSession} // Pass save handler
             />
           </div>
         </div>

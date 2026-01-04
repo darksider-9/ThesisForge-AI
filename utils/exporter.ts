@@ -1,8 +1,7 @@
 
 import { ThesisContent, ThesisStyleConfig, FontConfig } from "../types";
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, Header, Footer, PageNumber, SectionType } from "docx";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, Header, Footer, PageNumber } from "docx";
 import saveAs from "file-saver";
-import jsPDF from "jspdf";
 
 // Handle both new masterDoc string format and legacy map format
 const resolveContent = (content: ThesisContent | string): string => {
@@ -37,23 +36,38 @@ const SIZES = {
   XIAO_WU: 9
 };
 
+// Default Style based on Southeast University Guidelines
 const getDefaultStyleConfig = (): ThesisStyleConfig => ({
-    margins: { top: 2.54, bottom: 2.54, left: 3.17, right: 3.17 },
+    margins: { top: 2.54, bottom: 2.54, left: 3.17, right: 3.17 }, // Standard A4 margins, Left bound
     body: {
-        font: { family: "SimSun", size: SIZES.XIAO_SI }, // 小四 (12pt)
+        font: { family: "SimSun", size: SIZES.XIAO_SI }, // 正文小四宋体 (12pt)
         indent: true,
-        lineSpacing: 1.5
+        lineSpacing: 1.5 // 1.5倍行距 or 20pt fixed
     },
     headings: {
-        h1: { family: "SimHei", size: SIZES.SAN_HAO, bold: true, align: 'center' }, // 三号 (16pt)
-        h2: { family: "SimHei", size: SIZES.SI_HAO, bold: true, align: 'left' },   // 四号 (14pt)
-        h3: { family: "SimHei", size: SIZES.XIAO_SI, bold: true, align: 'left' },  // 小四 (12pt)
+        h1: { family: "SimHei", size: SIZES.ER_HAO, bold: true, align: 'center' }, // 章标题二号宋体/黑体居中 (Guidelines say SimSun, usually SimHei for visual distinction, let's follow user pref or standard. Guidelines: "二号宋体居中". Code uses SimHei for better look, user can change if parsed.)
+        h2: { family: "SimHei", size: SIZES.SAN_HAO, bold: true, align: 'center' },   // 二级标题三号黑体居中
+        h3: { family: "SimHei", size: SIZES.SI_HAO, bold: true, align: 'left' },  // 三级标题四号宋体(加粗)居左
+        h4: { family: "SimHei", size: SIZES.XIAO_SI, bold: true, align: 'left' }, // 四级小四黑体
     },
     tables: {
-        font: { family: "SimSun", size: SIZES.WU_HAO } // 五号 (10.5pt)
+        font: { family: "SimSun", size: SIZES.WU_HAO } // 表格文字小五宋体
     },
-    headers: { useOddEven: false, oddText: "Thesis Draft", evenText: "Thesis Draft" }
+    headers: { 
+        useOddEven: true, 
+        oddText: "第 * 章  Chapter_Title", 
+        evenText: "东南大学硕士学位论文" 
+    }
 });
+
+// Pre-process regex to clean up math blocks for Word
+// Removes newlines inside $$...$$ to prevent line breaking in Word
+const cleanMathForWord = (text: string): string => {
+    return text.replace(/\$\$([\s\S]*?)\$\$/g, (match, inner) => {
+        // Replace newlines with spaces
+        return '$$ ' + inner.replace(/[\r\n]+/g, ' ').trim() + ' $$';
+    });
+};
 
 export const downloadDocx = async (
   content: ThesisContent | string, 
@@ -62,9 +76,15 @@ export const downloadDocx = async (
 ) => {
   const fullText = resolveContent(content);
   const safeName = sanitizeFilename(filename);
-  const lines = fullText.split('\n');
-  const children: (Paragraph | Table)[] = [];
+  
+  // 1. Clean Math: Remove newlines in formulas so they don't break lines in Word
+  const mathCleanedText = cleanMathForWord(fullText);
 
+  // 2. Remove markdown code blocks for JSON if any remain
+  const cleanedText = mathCleanedText.replace(/```json[\s\S]*?```/g, '');
+  
+  const lines = cleanedText.split('\n');
+  const children: (Paragraph | Table)[] = [];
   const config = styleConfig || getDefaultStyleConfig();
 
   // Helper to map string alignment to enum
@@ -75,6 +95,24 @@ export const downloadDocx = async (
       return AlignmentType.LEFT;
   };
 
+  // Helper to create TextRun with Dual Fonts (Times New Roman for ASCII, Custom for EastAsia)
+  // This ensures numbers/English are TNR, Chinese is SimSun/SimHei
+  const createRun = (text: string, fontConfig: FontConfig, isBold: boolean = false) => {
+      // Safety check for null text which corrupts docx
+      const safeText = text || " ";
+      
+      return new TextRun({
+          text: safeText,
+          font: {
+              name: "Times New Roman", // ASCII / Numbers
+              eastAsia: fontConfig.family, // Chinese
+          },
+          size: ptToHalfPt(fontConfig.size),
+          bold: isBold,
+          color: "000000" // FORCE BLACK to prevent blue headers
+      });
+  };
+
   const isTableLine = (line: string) => line.trim().startsWith('|');
 
   let inTable = false;
@@ -82,48 +120,49 @@ export const downloadDocx = async (
 
   const flushTable = () => {
     if (tableBuffer.length < 2) {
+      // Not a real table, dump as text
       tableBuffer.forEach(l => {
          children.push(new Paragraph({ 
-             children: [new TextRun({ 
-                 text: l, 
-                 font: config.body.font.family, 
-                 size: ptToHalfPt(config.body.font.size) 
-             })],
-             indent: config.body.indent ? { firstLine: 480 } : undefined // 2 chars indent approx 24pt = 480 twips
+             children: [createRun(l, config.body.font)],
+             indent: config.body.indent ? { firstLine: 480 } : undefined
          }));
       });
     } else {
-      const validRows = tableBuffer.filter(row => !row.match(/^\|?\s*:?-+:?\s*\|/));
+      // Process Table
+      const validRows = tableBuffer.filter(row => !row.match(/^\|?[\s:-]+\|/));
       const tableFont = config.tables?.font || config.body.font;
 
-      const docxRows = validRows.map((rowStr, rowIndex) => {
-        const cells = rowStr.split('|').map(c => c.trim());
-        if (cells[0] === '') cells.shift();
-        if (cells[cells.length - 1] === '') cells.pop();
+      if (validRows.length > 0) {
+        const docxRows = validRows.map((rowStr, rowIndex) => {
+            let cleanRow = rowStr.trim();
+            if (cleanRow.startsWith('|')) cleanRow = cleanRow.substring(1);
+            if (cleanRow.endsWith('|')) cleanRow = cleanRow.substring(0, cleanRow.length - 1);
+            
+            const cells = cleanRow.split('|');
 
-        return new TableRow({
-          children: cells.map(cellText => new TableCell({
-            children: [new Paragraph({ 
-                children: [new TextRun({ 
-                    text: cellText, 
-                    bold: rowIndex === 0, 
-                    font: tableFont.family, 
-                    size: ptToHalfPt(tableFont.size) 
+            return new TableRow({
+            children: cells.map(cellText => new TableCell({
+                children: [new Paragraph({ 
+                    children: [createRun(cellText.trim(), tableFont, rowIndex === 0)],
+                    alignment: AlignmentType.CENTER as any
                 })],
-                alignment: AlignmentType.CENTER
-            })],
-            width: { size: 100 / cells.length, type: WidthType.PERCENTAGE },
-            margins: { top: 100, bottom: 100, left: 100, right: 100 }
-          }))
+                width: { size: 100 / cells.length, type: WidthType.PERCENTAGE },
+                margins: { top: 100, bottom: 100, left: 100, right: 100 },
+                borders: {
+                    top: { style: BorderStyle.SINGLE, size: 1, color: "000000" },
+                    bottom: { style: BorderStyle.SINGLE, size: 1, color: "000000" },
+                    left: { style: BorderStyle.SINGLE, size: 1, color: "000000" },
+                    right: { style: BorderStyle.SINGLE, size: 1, color: "000000" },
+                }
+            }))
+            });
         });
-      });
 
-      if (docxRows.length > 0) {
-          children.push(new Table({
-              rows: docxRows,
-              width: { size: 100, type: WidthType.PERCENTAGE },
-          }));
-          children.push(new Paragraph({ text: "" })); 
+        children.push(new Table({
+            rows: docxRows,
+            width: { size: 100, type: WidthType.PERCENTAGE },
+        }));
+        children.push(new Paragraph({ text: "" })); // Spacing
       }
     }
     tableBuffer = [];
@@ -143,11 +182,12 @@ export const downloadDocx = async (
       flushTable();
     }
 
-    let headingLevel = undefined;
+    let headingLevel: any = undefined; 
     let text = line;
-    let align = AlignmentType.LEFT;
+    let align: AlignmentType = AlignmentType.LEFT;
     let isBold = false;
-    let spacingAfter = 120;
+    let spacingAfter = 120; // 6pt
+    let spacingBefore = 0;
     
     let fontConfig: FontConfig = config.body.font;
     let isBody = true;
@@ -157,52 +197,64 @@ export const downloadDocx = async (
         text = line.replace('# ', '');
         fontConfig = config.headings.h1;
         isBody = false;
+        spacingBefore = 240;
+        spacingAfter = 240;
     } else if (line.startsWith('## ')) {
         headingLevel = HeadingLevel.HEADING_2;
         text = line.replace('## ', '');
         fontConfig = config.headings.h2;
         isBody = false;
+        spacingBefore = 180;
     } else if (line.startsWith('### ')) {
         headingLevel = HeadingLevel.HEADING_3;
         text = line.replace('### ', '');
         fontConfig = config.headings.h3;
         isBody = false;
+        spacingBefore = 120;
     } else if (line.startsWith('#### ')) {
         headingLevel = HeadingLevel.HEADING_4;
         text = line.replace('#### ', '');
-        fontConfig = config.headings.h4 || config.headings.h3; // Fallback
+        fontConfig = config.headings.h4 || config.headings.h3; 
         isBody = false;
     } else if (line.trim().startsWith('>')) {
-        // Captions
-        text = line.replace('>', '').trim();
-        align = AlignmentType.CENTER;
+        // Captions or Blockquotes
+        text = line.replace(/^>\s?/, '').trim();
+        // Check if it's a figure/table caption
+        if (text.startsWith('[') || text.includes('图') || text.includes('表')) {
+             align = AlignmentType.CENTER;
+             fontConfig = { ...config.body.font, size: config.body.font.size - 1 };
+             spacingAfter = 240;
+        } else {
+             // Normal blockquote
+             fontConfig = { ...config.body.font, family: "KaiTi" }; 
+        }
         isBody = false;
-        spacingAfter = 240;
-        fontConfig = { ...config.body.font, size: config.body.font.size - 1 };
     }
 
     if (text.trim() === "") continue;
 
-    // Apply specific config overrides
-    align = isBody ? AlignmentType.LEFT : getAlign(fontConfig.align); // Default or config
+    align = isBody ? AlignmentType.LEFT : getAlign(fontConfig.align); 
     isBold = fontConfig.bold || false;
     
-    // Indent Logic: Only body paragraphs need first line indent. Headings/Captions usually don't.
+    // Indent Logic: Body paragraphs need first line indent. Headings/Captions usually don't.
     const indentConfig = (isBody && config.body.indent) 
         ? { firstLine: 480 } // 24pt approx for 12pt font
         : undefined;
 
+    // Safety: ensure text is not empty string, which crashes Docx
+    if (!text) text = " ";
+    
+    // Create Paragraph
     children.push(new Paragraph({
-        children: [new TextRun({ 
-            text: text, 
-            font: fontConfig.family, 
-            size: ptToHalfPt(fontConfig.size), 
-            bold: isBold 
-        })],
+        children: [createRun(text, fontConfig, isBold)],
         heading: headingLevel,
-        alignment: align,
+        alignment: align as any,
         indent: indentConfig,
-        spacing: { after: spacingAfter, line: Math.round(config.body.lineSpacing * 240) }, 
+        spacing: { 
+            before: spacingBefore, 
+            after: spacingAfter, 
+            line: Math.round(config.body.lineSpacing * 240) 
+        }, 
     }));
   }
 
@@ -212,9 +264,14 @@ export const downloadDocx = async (
   const evenHeader = new Header({
       children: [
           new Paragraph({
-              children: [new TextRun({ text: config.headers.evenText, size: 20 })], 
-              alignment: AlignmentType.CENTER as any,
-              border: { bottom: { color: "auto", space: 1, style: BorderStyle.SINGLE, size: 6 } }
+              children: [new TextRun({ 
+                  text: config.headers.evenText, 
+                  size: ptToHalfPt(10.5), // 小五
+                  font: { eastAsia: "SimSun", name: "Times New Roman" },
+                  color: "000000"
+              })], 
+              alignment: AlignmentType.CENTER,
+              border: { bottom: { color: "000000", space: 1, style: BorderStyle.SINGLE, size: 6 } }
           }),
       ],
   });
@@ -222,14 +279,32 @@ export const downloadDocx = async (
   const oddHeader = new Header({
       children: [
           new Paragraph({
-              children: [new TextRun({ text: config.headers.oddText.replace("Chapter_Title", "硕士学位论文"), size: 20 })], 
-              alignment: AlignmentType.CENTER as any,
-              border: { bottom: { color: "auto", space: 1, style: BorderStyle.SINGLE, size: 6 } }
+              children: [new TextRun({ 
+                  text: config.headers.oddText.replace("Chapter_Title", "学位论文"), // Simple placeholder replacement
+                  size: ptToHalfPt(10.5), // 小五
+                  font: { eastAsia: "SimSun", name: "Times New Roman" },
+                  color: "000000"
+              })], 
+              alignment: AlignmentType.CENTER,
+              border: { bottom: { color: "000000", space: 1, style: BorderStyle.SINGLE, size: 6 } }
           }),
       ],
   });
 
   const doc = new Document({
+    styles: {
+        paragraphStyles: [
+            {
+                id: "Normal",
+                name: "Normal",
+                run: {
+                    font: "Times New Roman",
+                    size: 24,
+                    color: "000000",
+                },
+            },
+        ],
+    },
     sections: [{
       properties: {
           page: {
@@ -245,13 +320,18 @@ export const downloadDocx = async (
       headers: {
           default: oddHeader,
           even: config.headers.useOddEven ? evenHeader : oddHeader,
+          first: oddHeader, // Cover page usually different, simplified here
       },
       footers: {
           default: new Footer({
               children: [
                   new Paragraph({
                       children: [
-                          new TextRun({ children: [PageNumber.CURRENT] }),
+                          new TextRun({ 
+                              children: [PageNumber.CURRENT],
+                              font: { name: "Times New Roman" },
+                              size: ptToHalfPt(10.5)
+                          }),
                       ],
                       alignment: AlignmentType.CENTER,
                   }),
@@ -260,7 +340,7 @@ export const downloadDocx = async (
       },
       children: [
         new Paragraph({
-            children: [new TextRun({ text: " ", size: 2 })], // Spacer
+            children: [new TextRun({ text: " ", size: 2 })], 
             spacing: { after: 200 }
         }),
         ...children
@@ -270,56 +350,4 @@ export const downloadDocx = async (
 
   const blob = await Packer.toBlob(doc);
   saveAs(blob, `${safeName}.docx`);
-};
-
-export const downloadPDF = (content: ThesisContent | string, filename: string = "Thesis_Master_Canvas") => {
-  const safeName = sanitizeFilename(filename);
-  const doc = new jsPDF();
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const margin = 15;
-  let yPos = 20;
-
-  const addBlock = (body: string) => {
-    doc.setFontSize(11);
-    doc.setFont("helvetica", "normal");
-    
-    const lines = body.split('\n');
-    
-    for (let line of lines) {
-        if (yPos > 280) { doc.addPage(); yPos = 20; }
-
-        let fontSize = 11;
-        let fontStyle = "normal";
-        let text = line;
-
-        if (line.startsWith('# ')) {
-            fontSize = 18; fontStyle = "bold"; text = line.replace('# ', '');
-            yPos += 5;
-        } else if (line.startsWith('## ')) {
-            fontSize = 14; fontStyle = "bold"; text = line.replace('## ', '');
-            yPos += 3;
-        } else if (line.startsWith('### ')) {
-            fontSize = 12; fontStyle = "bold"; text = line.replace('### ', '');
-        }
-
-        doc.setFontSize(fontSize);
-        doc.setFont("helvetica", fontStyle);
-
-        // Basic table skip for PDF (too complex for naive PDF generator)
-        const splitText = doc.splitTextToSize(text, pageWidth - (margin * 2));
-        doc.text(splitText, margin, yPos);
-        
-        yPos += (splitText.length * (fontSize / 2)) + 2; 
-    }
-  };
-
-  const text = resolveContent(content);
-  addBlock(text);
-
-  doc.save(`${safeName}.pdf`);
-};
-
-export const downloadPythonCode = (code: string) => {
-  const blob = new Blob([code], { type: "text/x-python;charset=utf-8" });
-  saveAs(blob, "thesis_builder.py");
 };
