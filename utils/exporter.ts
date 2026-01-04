@@ -35,7 +35,7 @@ const SIZES = {
   XIAO_WU: 9
 };
 
-// Default Style based on Southeast University Guidelines
+// Default Style based on Southeast University Guidelines (Modified: H1 Center, H2+ Left)
 const getDefaultStyleConfig = (): ThesisStyleConfig => ({
     margins: { top: 2.54, bottom: 2.54, left: 3.17, right: 3.17 }, // Standard A4 margins, Left bound
     body: {
@@ -44,10 +44,10 @@ const getDefaultStyleConfig = (): ThesisStyleConfig => ({
         lineSpacing: 1.5 // 1.5倍行距 or 20pt fixed
     },
     headings: {
-        h1: { family: "SimHei", size: SIZES.ER_HAO, bold: true, align: 'center' }, // 章标题二号宋体/黑体居中 (Guidelines say SimSun, usually SimHei for visual distinction, let's follow user pref or standard. Guidelines: "二号宋体居中". Code uses SimHei for better look, user can change if parsed.)
-        h2: { family: "SimHei", size: SIZES.SAN_HAO, bold: true, align: 'center' },   // 二级标题三号黑体居中
-        h3: { family: "SimHei", size: SIZES.SI_HAO, bold: true, align: 'left' },  // 三级标题四号宋体(加粗)居左
-        h4: { family: "SimHei", size: SIZES.XIAO_SI, bold: true, align: 'left' }, // 四级小四黑体
+        h1: { family: "SimHei", size: SIZES.ER_HAO, bold: true, align: 'center' }, // 章标题二号黑体，居中
+        h2: { family: "SimHei", size: SIZES.SAN_HAO, bold: true, align: 'left' },   // 二级标题三号黑体，顶格
+        h3: { family: "SimHei", size: SIZES.SI_HAO, bold: true, align: 'left' },  // 三级标题四号宋体(加粗)，顶格
+        h4: { family: "SimHei", size: SIZES.XIAO_SI, bold: true, align: 'left' }, // 四级小四黑体，顶格
     },
     tables: {
         font: { family: "SimSun", size: SIZES.WU_HAO } // 表格文字小五宋体
@@ -192,7 +192,7 @@ export const downloadDocx = async (
 
     let headingLevel: any = undefined; 
     let text = line;
-    let align = AlignmentType.LEFT;
+    let align: AlignmentType = AlignmentType.LEFT;
     let isBold = false;
     let spacingAfter = 120; // 6pt
     let spacingBefore = 0;

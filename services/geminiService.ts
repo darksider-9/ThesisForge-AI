@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { UserInput, ThesisSection, ThesisStructure, ApiConfig, Agent, ThesisStyleConfig } from "../types";
 
