@@ -1,4 +1,3 @@
-
 import { ThesisContent, ThesisStyleConfig, FontConfig } from "../types";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, Header, Footer, PageNumber } from "docx";
 import saveAs from "file-saver";
@@ -97,7 +96,7 @@ export const downloadDocx = async (
   const config = styleConfig || getDefaultStyleConfig();
 
   // Helper to map string alignment to enum
-  const getAlign = (align?: string): AlignmentType => {
+  const getAlign = (align?: string) => {
       if (align === 'center') return AlignmentType.CENTER;
       if (align === 'right') return AlignmentType.RIGHT;
       if (align === 'justify') return AlignmentType.JUSTIFIED;
@@ -193,7 +192,7 @@ export const downloadDocx = async (
 
     let headingLevel: any = undefined; 
     let text = line;
-    let align: AlignmentType = AlignmentType.LEFT;
+    let align = AlignmentType.LEFT;
     let isBold = false;
     let spacingAfter = 120; // 6pt
     let spacingBefore = 0;

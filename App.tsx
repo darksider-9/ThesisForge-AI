@@ -49,7 +49,7 @@ const PLANNER_PROMPT = `
 ### 原则
 1. **纯净正文（重要）**：输出的内容**绝对不要**包含章节标题本身。渲染器会自动添加标题。你只需直接写正文段落。
 2. **纯文字模式**：**严禁生成任何 Markdown 表格、图片占位符或图表描述**。这些将由专门的视觉专家生成。你专注于文字阐述、逻辑推导和公式证明。
-3. **数学公式**：**必须**使用 LaTeX 格式。行内公式使用 $...$，独立公式使用 $$...$$。
+3. **数学公式**：**必须**使用 LaTeX 格式。行内公式使用 $...$，独立公式用双美元符号 $$...$$。
 4. **完整性**：你将收到一个章节下的多个小节 ID。你需要一次性为**所有**这些 ID 撰写内容。
 5. **深度**：内容必须包含数学公式推导、理论证明和详尽的数据分析（以文字形式描述）。
 6. **格式**：输出 JSON，Key 为 ID，Value 为 Markdown 正文。
@@ -206,7 +206,8 @@ function App() {
       logs,
       currentAgentIndex,
       isPaused,
-      isWorking // though we usually save when paused
+      isWorking, // though we usually save when paused
+      apiConfig // SAVE THE CONFIG so user doesn't lose API Key on reload
     };
     
     const blob = new Blob([JSON.stringify(sessionData, null, 2)], { type: 'application/json' });
@@ -241,6 +242,13 @@ function App() {
           setLogs(json.logs || []);
           setCurrentAgentIndex(json.currentAgentIndex ?? -1);
           setIsPaused(json.isPaused || false);
+          // Restore API Config if present
+          if (json.apiConfig) {
+             setApiConfig(json.apiConfig);
+          } else {
+             addLog("提示: 存档中未检测到API配置，请记得在设置中重新填写API Key。", 'info');
+          }
+
           // Force stop working on load to prevent weird states
           setIsWorking(false);
           

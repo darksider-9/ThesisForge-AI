@@ -196,7 +196,7 @@ const callLLM = async (
 
   // 2. Default Google Gemini API
   const apiKey = process.env.API_KEY;
-  if (!apiKey) throw new Error("API_KEY is missing.");
+  if (!apiKey) throw new Error("API_KEY is missing. Please configure Custom API in settings.");
   
   const ai = new GoogleGenAI({ apiKey });
   
@@ -569,6 +569,7 @@ export const runContentInjectionAgent = async (
     } catch (e: any) {
         // **ERROR HANDLING: AUTOMATIC BATCH SPLITTING**
         const errorMsg = e.message || e.toString();
+        // Distinguish between JSON parsing errors (retryable) and API errors (critical)
         if (errorMsg.includes("Fatal JSON Error") || errorMsg.includes("JSON") || errorMsg.includes("SyntaxError")) {
             console.warn(`Error detected in ${chapter.root.title}. Switching to Safety Batch Mode (3 batches).`, e);
             
@@ -583,12 +584,18 @@ export const runContentInjectionAgent = async (
             for (const chunk of chunks) {
                 try {
                     await processBatch(chunk, chapter.root.title);
-                } catch (retryError) {
+                } catch (retryError: any) {
+                    const retryMsg = retryError.message || "";
+                    if (!retryMsg.includes("JSON") && !retryMsg.includes("Syntax")) {
+                         // Critical error during retry, must propagate
+                         throw retryError;
+                    }
                     console.error(`Batch retry failed for part of ${chapter.root.title}`, retryError);
                 }
             }
         } else {
-            console.error(`Non-JSON error in ${chapter.root.title}, skipping.`, e);
+            console.error(`Critical error in ${chapter.root.title}, aborting agent.`, e);
+            throw e; // Re-throw critical API errors (e.g., 401, network error)
         }
     }
   }
