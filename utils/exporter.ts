@@ -192,7 +192,7 @@ export const downloadDocx = async (
 
     let headingLevel: any = undefined; 
     let text = line;
-    let align: AlignmentType = AlignmentType.LEFT;
+    let align = AlignmentType.LEFT;
     let isBold = false;
     let spacingAfter = 120; // 6pt
     let spacingBefore = 0;
@@ -278,7 +278,7 @@ export const downloadDocx = async (
                   font: { eastAsia: "SimSun", name: "Times New Roman" },
                   color: "000000"
               })], 
-              alignment: AlignmentType.CENTER,
+              alignment: AlignmentType.CENTER as any,
               border: { bottom: { color: "000000", space: 1, style: BorderStyle.SINGLE, size: 6 } }
           }),
       ],
@@ -293,7 +293,7 @@ export const downloadDocx = async (
                   font: { eastAsia: "SimSun", name: "Times New Roman" },
                   color: "000000"
               })], 
-              alignment: AlignmentType.CENTER,
+              alignment: AlignmentType.CENTER as any,
               border: { bottom: { color: "000000", space: 1, style: BorderStyle.SINGLE, size: 6 } }
           }),
       ],

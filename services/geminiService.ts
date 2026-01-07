@@ -45,6 +45,59 @@ const FIXER_VISUALS_PROMPT = `
 3. 返回 JSON。
 `;
 
+const REFINE_CHAT_SYSTEM_PROMPT = `
+### 角色设定
+你是一位**资深理工科硕士生导师**。
+你的目标是指导学生完成一篇结构严谨、逻辑闭环、符合学术规范的**硕士学位论文**。
+
+### 核心任务
+通过多轮苏格拉底式的引导提问，从用户（学生）那里挖掘撰写核心章节所需的全部素材。最终，你将作为**“信息整合专家”**，将所有对话细节汇总成一份详尽的上下文指令。
+
+### 交互策略与准则 (分阶段引导)
+
+**阶段一：领域与题目定调**
+- 询问研究的大方向（如计算机视觉、自然语言处理等）。
+- 协助拟定一个学术性强、不空泛的题目。
+
+**阶段二：核心章节架构**
+- 硕士论文通常包含 2-3 个核心创新章（例如：第3章提出改进算法A，第4章应用A解决具体场景B）。
+- 询问学生打算安排几个核心章，每一章解决什么具体痛点（Gap）。
+
+**阶段三：方法论深度挖掘 (Method)**
+- 针对核心算法，拒绝浅层描述。必须追问：
+  - “这个模块的具体输入输出是什么？”
+  - “核心公式是如何定义的？Loss Function 包含哪几项？”
+  - “相较于 Baseline，你的具体改进机制在哪里？”
+
+**阶段四：实验设计与评估 (Experiments)**
+- **数据集**：使用什么公开数据集或私有数据？
+- **对比方法 (Baselines)**：对比了哪些 SOTA 方法？
+- **评价指标 (Metrics)**：
+  - **重要**：询问使用哪些具体的量化指标来评价性能（如 PSNR, SSIM, Dice, Accuracy, F1-score）。
+  - **注意**：**不要**询问具体的实验数值结果（不要问“跑了多少分”），只确认“用什么测”。
+- **图表规划 (Visuals - 主动提案模式)**：
+  - **重要**：在此阶段，不要问学生“你想怎么画表”。**你要根据前几轮对话收集到的信息（方法、对比模型、指标），主动设计并展示预期的三线表结构。**
+  - **主实验表提案**：例如：“基于您提到的对比方法 [A, B] 和指标 [X, Y]，我建议设计如下的主实验对比表：行是[Method A, Method B, Ours]，列是[Metric X, Metric Y]。预期 Ours 在 X 指标上最优...”
+  - **消融实验表提案**：例如：“为了验证您提到的 [模块M]，我建议设计一个消融实验表，设置变体 [Base, Base+M1, Base+M2, Ours]，以证明各模块有效性。”
+  - **交互**：给出你的设计方案后，请学生**审阅**：“您看这个表格设计是否合理？还需要补充其他对比维度或删除某些行吗？”
+
+### 结束与输出条件 (Synthesis)
+**只有**当你认为信息已经足够支撑生成一篇长文时（即 Method 细节清晰，实验设计完备，且图表结构已由你提案并经用户确认），请执行以下操作：
+
+1. 向用户发送结束语：“✅ **核心信息采集完毕**。我已经作为信息整合专家，将您的想法整理为一份详细的生成指令。请点击右上角的 **[应用方案]** 按钮。”
+2. **紧接着**，在回复的**最后**，输出一个包含以下 JSON 的代码块。
+
+\`\`\`json
+{
+  "title": "最终确定的学术题目",
+  "field": "研究领域",
+  "refinedContext": "这是一个Markdown格式的【超级指令】，由你作为信息整合专家编写。内容必须包含：\n\n1. **核心逻辑链**：输入->方法->输出的完整闭环。\n2. **章节详细安排**：明确第3、4、5章分别写什么。\n3. **详细的方法定义**：包含对话中挖掘到的Loss函数描述、模块细节。\n4. **实验与图表矩阵**：明确列出需要生成的【三线表】结构（行是哪些对比方法，列是哪些Metrics，预期趋势），以及消融实验的设计。\n5. **预期结论**：基于指标的预期优越性描述。"
+}
+\`\`\`
+
+**注意**：在对话过程中，**不要**输出 JSON，只用专业、循循善诱的中文与用户交流。只有在最后一步才输出 JSON 代码块。
+`;
+
 const cleanText = (text: string | undefined): string => {
   if (!text) return "";
   return text.trim();
@@ -151,9 +204,13 @@ const callLLM = async (
         model: config.modelName,
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
+          // If userPrompt is actually a stringified JSON history (hack for simple call), parse it?
+          // But our main callLLM signature assumes userPrompt is a string.
+          // For Chat, we will bypass this function slightly or adapt it.
+          // **ADAPTATION**: If userPrompt looks like a chat history array, use it directly.
+          ...(isJsonString(userPrompt) ? JSON.parse(userPrompt) : [{ role: "user", content: userPrompt }])
         ],
-        temperature: 0.5,
+        temperature: 0.7, // Higher temp for creative brainstorming
       };
 
       // 15-minute timeout for reasoning models
@@ -200,13 +257,31 @@ const callLLM = async (
   const ai = new GoogleGenAI({ apiKey });
   
   try {
+    // For Chat, we need a slightly different call structure if using Gemini SDK directly
+    // But to keep it simple, we reuse generateContent with history in 'contents' if possible
+    // OR we just use the simple generateContent for now, constructing the prompt manually.
+    
+    // Construct full prompt from history if userPrompt is JSON history
+    let finalPrompt = userPrompt;
+    let history: {role: string, content: string}[] = [];
+    if (isJsonString(userPrompt)) {
+        history = JSON.parse(userPrompt);
+        // Convert history to Gemini format string or chat session
+        // For simplicity in this helper, we'll just concat for now if it's not a chat session object
+        // Actually, let's just stick to the Custom API style for chat mostly, or handle single turn here.
+        // Given constraints, let's assume Custom API is preferred for Chat.
+        // If Gemini, we'll just send the last message + context.
+        const lastMsg = history[history.length - 1].content;
+        finalPrompt = `Previous Context:\n${JSON.stringify(history.slice(0, -1))}\n\nCurrent Request: ${lastMsg}`;
+    }
+
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: userPrompt,
+      contents: finalPrompt,
       config: {
         systemInstruction: systemPrompt,
         responseMimeType: jsonMode ? "application/json" : "text/plain",
-        temperature: 0.5
+        temperature: 0.7
       }
     });
     return cleanText(response.text);
@@ -218,150 +293,60 @@ const callLLM = async (
   }
 };
 
-// ** NEW: Style Parser Agent **
-export const parseStyleGuide = async (
-    rawGuide: string,
+const isJsonString = (str: string) => {
+    try {
+        const o = JSON.parse(str);
+        return (o && typeof o === "object");
+    } catch (e) { return false; }
+};
+
+// ** NEW: Interactive Chat Refinement Agent **
+export const runRefinementChat = async (
+    history: { role: string; content: string }[],
     apiConfig?: ApiConfig
-): Promise<ThesisStyleConfig> => {
-    const systemPrompt = `
-    ### 角色
-    你是一位**中文论文排版专家**。
-
-    ### 任务
-    从用户提供的非结构化文本中提取排版参数，输出为 JSON。
-
-    ### 字体映射规则 (非常重要)
-    - **宋体**: 输出 "SimSun"
-    - **黑体**: 输出 "SimHei"
-    - **楷体**: 输出 "KaiTi"
-    - **仿宋**: 输出 "FangSong"
-    - **Times New Roman**: 输出 "Times New Roman"
-
-    ### 字号对照表 (pt)
-    - 初号=42, 小初=36
-    - 一号=26, 小一=24
-    - 二号=22, 小二=18
-    - 三号=16, 小三=15
-    - 四号=14, 小四=12
-    - 五号=10.5, 小五=9
-
-    ### 结构映射逻辑
-    1. **Body (正文)**: 提取正文字体、字号。如果提到"首行缩进"，设置 indent: true。
-    2. **Headings (标题)**:
-       - 用户说的"章" (Chapter) 对应 JSON 中的 **h1**。
-       - 用户说的"节" (Section) 对应 JSON 中的 **h2**。
-       - 用户说的"小节" (Subsection) 对应 JSON 中的 **h3**。
-       - 注意：如果用户说"一级标题（题目）"，通常指论文总标题，但请将其规则同时也映射给 **h1** (章标题)，除非明确区分了"章标题"的规则。优先匹配明确的"章"、"节"规则。
-    3. **Tables (表格)**: 提取表格内容的字体和字号。
-
-    ### JSON 字段结构
-    {
-      "margins": { "top": 2.54, "bottom": 2.54, "left": 3.17, "right": 3.17 },
-      "body": { 
-          "font": { "family": "SimSun", "size": 12 }, 
-          "indent": true,
-          "lineSpacing": 1.5 
-      },
-      "headings": {
-          "h1": { "family": "SimHei", "size": 16, "bold": true, "align": "center" },
-          "h2": { "family": "SimHei", "size": 14, "bold": true, "align": "left" },
-          "h3": { "family": "SimHei", "size": 12, "bold": true, "align": "left" }
-      },
-      "tables": {
-          "font": { "family": "SimSun", "size": 10.5 }
-      },
-      "headers": { "useOddEven": false, "oddText": "...", "evenText": "..." }
-    }
-    `;
-
-    const userPrompt = `
-    ### 用户排版要求
-    ${rawGuide}
-
-    ### 请提取 JSON
-    `;
+): Promise<{ text: string; finished: boolean; data?: any }> => {
+    
+    // We pass the whole history to the LLM
+    // Hack: We serialize history to pass it through our generic callLLM 'userPrompt' argument
+    // The callLLM function has been patched above to detect JSON array string and use it as messages.
+    const historyPayload = JSON.stringify(history);
 
     try {
-        const responseText = await callLLM(systemPrompt, userPrompt, apiConfig, true);
-        const parsed = extractJson(responseText);
+        // We set jsonMode to FALSE because we want natural conversation mostly.
+        // The prompt instructs the LLM to output JSON only at the end.
+        const responseText = await callLLM(REFINE_CHAT_SYSTEM_PROMPT, historyPayload, apiConfig, false);
         
-        // Default fallbacks if parsing misses something
+        // Check for JSON block indicating completion
+        const jsonMatch = extractJson(responseText); // This tries to find JSON in the text
+        
+        // Heuristic: If we found a valid JSON object that has 'refinedContext' and 'title', 
+        // AND the text explicitly mentions completion or we found the block at the end.
+        if (jsonMatch && jsonMatch.title && jsonMatch.refinedContext) {
+             return {
+                 text: responseText.replace(/```json[\s\S]*?```/g, ''), // Remove the JSON from display text
+                 finished: true,
+                 data: jsonMatch
+             };
+        }
+
         return {
-            margins: parsed.margins || { top: 2.5, bottom: 2.5, left: 3, right: 2.5 },
-            body: {
-                font: parsed.body?.font || { family: "SimSun", size: 12 },
-                indent: parsed.body?.indent !== undefined ? parsed.body.indent : true,
-                lineSpacing: parsed.body?.lineSpacing || 1.5
-            },
-            headings: {
-                h1: parsed.headings?.h1 || { family: "SimHei", size: 16, bold: true, align: "center" },
-                h2: parsed.headings?.h2 || { family: "SimHei", size: 14, bold: true, align: "left" },
-                h3: parsed.headings?.h3 || { family: "SimHei", size: 12, bold: true, align: "left" },
-                h4: parsed.headings?.h4 || { family: "SimHei", size: 12, bold: true, align: "left" }
-            },
-            tables: {
-                font: parsed.tables?.font || { family: "SimSun", size: 10.5 }
-            },
-            headers: parsed.headers || {
-                useOddEven: false,
-                oddText: "Master Thesis",
-                evenText: "Master Thesis"
-            },
-            rawGuide: rawGuide
+            text: responseText,
+            finished: false
         };
+
     } catch (e: any) {
-        console.error("Style parsing failed", e);
-        throw new Error("Failed to parse style guide.");
+        console.error("Refinement Chat failed", e);
+        throw new Error("Advisor is offline. Check API settings.");
     }
 };
 
-// ** NEW: Idea Refinement Agent **
+// Deprecated single-shot agent (kept for type safety if needed, but UI uses Chat now)
 export const runIdeaRefinementAgent = async (
     rawInput: string,
     apiConfig?: ApiConfig
 ): Promise<{ title: string; field: string; refinedContext: string }> => {
-    const systemPrompt = `
-    ### 角色
-    你是一位**理工科博士生导师**，擅长将学生杂乱的实验想法整理成严谨的**硕士论文开题报告**。
-
-    ### 任务
-    分析用户的原始输入（可能包含混乱的实验细节、方法片段），整理出结构化的论文规格说明。
-
-    ### 关键输出要求 (JSON)
-    1. **title**: 提炼一个学术性强、简洁的中文题目。
-    2. **field**: 归纳研究领域（如医学图像处理）。
-    3. **refinedContext**: 这是一个Markdown格式的详细说明，将作为后续AI生成的"上下文指令"。必须包含：
-        - **核心逻辑链**: 输入->方法->输出。
-        - **章节安排策略**: 明确指出核心章节应该怎么分（例如：第三章做生成与配准，第四章做重建）。避免章节内容重合。
-        - **实验设计矩阵**: 明确列出所有对比实验、消融实验的分组（Baseline vs Ours）。
-        - **图表规划**: 明确每一章需要哪些图表（Table X: ... Figure Y: ...）。
-
-    ### 思考逻辑
-    - 识别用户提到的具体技术（如CycleGAN, Mamba, PICCS）。
-    - 将零散的实验点归类到具体的章节中。
-    - 针对理工科论文，强调"对比实验"和"消融实验"的完整性。
-    `;
-
-    const userPrompt = `
-    ### 学生的原始想法
-    ${rawInput}
-
-    ### 请整理
-    请整理为 JSON 格式: { "title": "...", "field": "...", "refinedContext": "Markdown String..." }
-    `;
-
-    try {
-        const responseText = await callLLM(systemPrompt, userPrompt, apiConfig, true);
-        const parsed = extractJson(responseText);
-        return {
-            title: parsed.title || "未命名课题",
-            field: parsed.field || "通用领域",
-            refinedContext: parsed.refinedContext || rawInput
-        };
-    } catch (e: any) {
-        console.error("Refinement failed", e);
-        throw new Error("Idea refinement failed. Please try again.");
-    }
+    // Legacy fallback
+    return { title: "Legacy", field: "Legacy", refinedContext: rawInput };
 };
 
 export const runArchitectAgent = async (
@@ -815,4 +800,61 @@ export const generateAgentPrompt = async (name: string, description: string, api
   } catch (error) {
     return "Prompt generation failed.";
   }
+};
+
+export const parseStyleGuide = async (
+  rawText: string,
+  apiConfig?: ApiConfig
+): Promise<ThesisStyleConfig> => {
+  const systemPrompt = `
+    ### Role
+    You are a document formatting expert.
+
+    ### Task
+    Extract thesis formatting requirements from the user's provided style guide text.
+    Return a JSON object matching the standard configuration structure.
+
+    ### Target JSON Structure (TypeScript Interface)
+    {
+      margins: { top: number; bottom: number; left: number; right: number }; // unit: cm. default: 2.54
+      body: {
+        font: { family: string; size: number; }; // size in pt (e.g. 小四=12, 五号=10.5)
+        indent: boolean; // true if first line indent is required
+        lineSpacing: number; // e.g. 1.5 or 1.25
+      };
+      headings: {
+        h1: { family: string; size: number; bold: boolean; align: 'center'|'left' }; // Chapter title
+        h2: { family: string; size: number; bold: boolean; align: 'center'|'left' }; // Section title
+        h3: { family: string; size: number; bold: boolean; align: 'center'|'left' }; 
+      };
+      tables: {
+        font: { family: string; size: number; };
+      };
+      headers: {
+        useOddEven: boolean; // true if odd/even pages have different headers
+        oddText: string; 
+        evenText: string; 
+      };
+    }
+
+    ### Chinese Font Size Mapping
+    - 初号=42, 小初=36
+    - 一号=26, 小一=24
+    - 二号=22, 小二=18
+    - 三号=16, 小三=15
+    - 四号=14, 小四=12
+    - 五号=10.5, 小五=9
+
+    ### Output Rule
+    - Only return the JSON.
+    - Infer reasonable defaults for missing values.
+  `;
+
+  const userPrompt = `Here is the style guide text:\n${rawText}`;
+
+  const responseText = await callLLM(systemPrompt, userPrompt, apiConfig, true);
+  const json = extractJson(responseText);
+  
+  if (!json) throw new Error("Failed to parse style guide");
+  return json as ThesisStyleConfig;
 };
